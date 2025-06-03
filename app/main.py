@@ -6,8 +6,11 @@ from services.rag_service import RAGService
 import asyncio
 from fastapi.responses import StreamingResponse
 import uvicorn
+from dotenv import load_dotenv
 
-app = FastAPI(title="QRDI Chatbot API")
+load_dotenv()
+
+app = FastAPI()
 
 # Configure CORS
 app.add_middleware(
@@ -30,6 +33,9 @@ class ChatRequest(BaseModel):
     query: str
     chat_history: Optional[List[Dict[str, str]]] = None
     search_type: str = "ai_search"  # ai_search, knowledge_graph, combined
+
+class SuggestionsRequest(BaseModel):
+    query: str
 
 @app.post("/api/search")
 async def search_documents(request: SearchRequest):
@@ -55,6 +61,19 @@ async def chat(request: ChatRequest):
             query=request.query,
             chat_history=request.chat_history,
             search_type=request.search_type
+        )
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/suggestion")
+async def suggestions(request: SuggestionsRequest):
+    """
+    Get AI response for chat queries.
+    """
+    try:
+        response = await rag_service.get_suggestions(
+            query=request.query
         )
         return response
     except Exception as e:

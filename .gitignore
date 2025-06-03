@@ -5,3 +5,12 @@
 .env.production.local
 .env.development
 .env.test
+.venv
+app/__pycache__
+app/services/__pycache__
+app/services/rag_service.py
+app/services/rag_service.pyc
+app/services/rag_service.pyo
+app/services/rag_service.pyd
+app/services/rag_service.pyw
+app/services/__pycache__/
