@@ -105,10 +105,25 @@ class RAGService:
         logging.info(f"Filter string: {filter_string}")
         async with search_client:
             search_results = await search_client.search(
+                # search_text=query,
+                # filter=filter_string if filter_string else "",
+                # query_type="semantic",
+                # top=10,
                 search_text=query,
-                filter=filter_string if filter_string else "",
+                top=10,  # Fetch more to account for filtering
                 query_type="semantic",
-                top=10,
+                query_caption="extractive",
+                query_answer="extractive",
+                query_answer_count= 3,
+                query_caption_highlight_enabled=True,
+                vector_queries= [
+                        {
+                            "kind": "text",
+                            "text": query,
+                            "fields": "text_vector",
+                            "queryRewrites": "generative"
+                        }
+                    ],
             )
 
             async for result in search_results:
@@ -250,43 +265,66 @@ class RAGService:
             return query
 
     async def get_chat_response(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None, search_type: str = "ai_search"):
+        # Step 1: Use LLM to classify the query
+        try:
+            classify_prompt = (
+                "You are an assistant at Qatar Research Development and Innovation Council(QRDI). Use the following documents to answer the question.\n\n"
+                "Answer the question breifly and accurately based on the context provided.\n\n"
+                "if the user asked about anything regarding policy it should be in_scope"
+                "Classify the following user message as one of: 'greeting', 'thank_you','out_of_scope' or 'in_scope'. "
+                "Only reply with one of these three words.\n"
+                f"User message: {query}"
+            )
+            classification = self.chat_model.predict(classify_prompt).strip().lower()
+        except Exception as e:
+            classification = "in_scope"
+
+        # Step 2: If greeting or thank you, reply directly
+        if classification == "greeting":
+            return {
+                "answer": "Hello! How can I assist you today?",
+                "sources": []
+            }
+        elif classification == "out_of_scope":
+            return{
+                "answer": "This is out of scope",
+                 "sources": []
+            }
+        elif classification == "thank_you":
+            return {
+                "answer": "You're welcome! If you have more questions, feel free to ask.",
+                "sources": []
+            }
+
+        # Step 3: Otherwise, continue with normal RAG flow
         # Rewrite query if chat history exists
         if chat_history:
             query = self._rewrite_query_with_history(query, chat_history)
         # Retrieve docs from Azure Search
         documents = await self._azure_search(query)
-
         # Build the context string from document contents + metadata (limit length if needed)
         context_text = "\n\n---\n\n".join(
             [f"Content: {doc['content']}" for doc in documents]
         )
-
         # Prepare prompt template
         prompt_template = PromptTemplate(
             input_variables=["context", "question", "chat_history"],
             template=(
                 "You are an assistant at Qatar Research Development and Innovation Council(QRDI). Use the following documents to answer the question.\n\n"
                 "Answer the question breifly and accurately based on the context provided.\n\n"
-                "Do not add numeric points or bullet points\n\n"
-                "Make it as breif \n\n"
                 "Context: {context}\n\nQuestion: {question}\nAnswer:.\n\n"
                 "Chat History: {chat_history}.\n\n"
+                
+                "Only use the information provided in the context to answer the question.\n"
+                "If the answer is not explicitly found in the context, respond with: \"This is out of scope.\"\n"
+                "Avoid using numeric or bullet points.\n\n"
+                "Be brief, clear, and accurate.\n"
             )
         )
-        
-        # Optionally add conversation memory if you want
-       
-
         # Create prompt with context and question
         prompt = prompt_template.format(context=context_text, question=query, chat_history=format_chat_history(chat_history))
-        
-        
         # Call LLM
         response = self.chat_model.invoke(prompt)
-        
-        for doc in documents:
-            print(doc)
-
         # Format sources info
         sources = [
             {
@@ -297,12 +335,10 @@ class RAGService:
             }
             for doc in documents
         ]
-
         return {
             "answer": response.content,
             "sources": sources,
         }
-
 
     async def _generate_follow_up_questions(self, query: str, answer: str) -> List[str]:
         """Generate follow-up questions based on the chat response."""

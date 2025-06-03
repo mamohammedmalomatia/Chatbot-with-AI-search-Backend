@@ -2,11 +2,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from services.rag_service import RAGService
+from rag_service import RAGService
 import asyncio
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 import uvicorn
 from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
+import os
 
 load_dotenv()
 
@@ -98,6 +100,21 @@ async def health_check():
     Health check endpoint.
     """
     return {"status": "healthy"}
+
+# Serve static files from the 'frontend' directory
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+# Serve index.html at root and for all unknown routes (for SPA support)
+@app.get("/")
+async def serve_index():
+    return FileResponse(os.path.join("frontend", "index.html"))
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    file_path = os.path.join("frontend", full_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join("frontend", "index.html"))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
