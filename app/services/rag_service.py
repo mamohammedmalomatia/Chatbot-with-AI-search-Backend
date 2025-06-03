@@ -70,19 +70,21 @@ class RAGService:
         async with search_client:
             search_results = await search_client.search(
                 search_text=query,
-                top=10,
+                query_type="semantic",
+                top=3,
             )
 
             async for result in search_results:
                 results.append({
                     "id": result.get('id', ''),
-                    "title": result.get('title', ''),
+                    "title": result.get('title_Data_Column', ''),
                     "policy_type": result.get('policy_type', ''),
                     "department": result.get('department', ''),
                     "date": result.get('date', ''),
                     "content": result.get('chunk', ''),
                     "score": result.get('@search.score', 0.0),
-                    "page_number": result.get('page_number', 0)
+                    "page_number": result.get('page_number', 0),
+                    "source": result.get('source', ''),
                 })
 
         # logging.info(f"Search results: {results}")
@@ -170,7 +172,34 @@ class RAGService:
                 filter_parts.append(f"{field} eq '{value}'")
         return " and ".join(filter_parts)
 
+    def _rewrite_query_with_history(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> str:
+        """Rewrite ambiguous queries using chat history context via LLM."""
+        if not chat_history or not isinstance(chat_history, list) or len(chat_history) == 0:
+            return query
+        
+        try:
+            prompt = (
+                "You are an AI assistant. The user has asked a follow-up or ambiguous question. "
+                "Rewrite the user's question to be fully self-contained and explicit and make it breif as well, using the previous chat history for context. "
+                "Do not answer the question, just rewrite it.\n\n"
+                f"Chat History:\n{format_chat_history(chat_history)}\n\n"
+                f"User's Question: {query}\n\n"
+                "Rewritten Question:"
+            )
+            response = self.chat_model.predict(prompt)
+            rewritten = response.strip()
+            # If the LLM returns an empty or too short response, fallback to original query
+            if not rewritten or len(rewritten) < 5:
+                return query
+            return rewritten
+        except Exception as e:
+            logger.error(f"Error rewriting query: {str(e)}")
+            return query
+
     async def get_chat_response(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None, search_type: str = "ai_search"):
+        # Rewrite query if chat history exists
+        if chat_history:
+            query = self._rewrite_query_with_history(query, chat_history)
         # Retrieve docs from Azure Search
         documents = await self._azure_search(query)
 
@@ -183,9 +212,10 @@ class RAGService:
         prompt_template = PromptTemplate(
             input_variables=["context", "question", "chat_history"],
             template=(
-                "You are an AI assistant. Use the following documents to answer the question.\n\n"
-                "{context}\n\nQuestion: {question}\nAnswer:.\n\n"
-                "Chat History: {chat_history}"
+                "You are an assistant at Qatar Research Development and Innovation Council(QRDI). Use the following documents to answer the question.\n\n"
+                "Answer the question breifly and accurately based on the context provided.\n\n"
+                "Context: {context}\n\nQuestion: {question}\nAnswer:.\n\n"
+                "Chat History: {chat_history}.\n\n"
             )
         )
         
@@ -198,13 +228,17 @@ class RAGService:
         
         # Call LLM
         response = self.chat_model.invoke(prompt)
+        
+        for doc in documents:
+            print(doc)
 
         # Format sources info
         sources = [
             {
                 "title": doc.get("title"),
                 "source": doc.get("source"),
-                "relevance": doc.get("score", 0.0)
+                "relevance": doc.get("score", 0.0),
+                "page": doc.get("page_number", 0)
             }
             for doc in documents
         ]
@@ -212,24 +246,35 @@ class RAGService:
         return {
             "answer": response.content,
             "sources": sources,
-            "follow_up_questions": self._generate_follow_up_questions(query, response.content)
         }
 
 
-    def _generate_follow_up_questions(self, query: str, answer: str) -> List[str]:
+    async def _generate_follow_up_questions(self, query: str, answer: str) -> List[str]:
         """Generate follow-up questions based on the chat response."""
+        
+        documents = await self._azure_search(query)
+        # Build the context string from document contents + metadata (limit length if needed)
+        context_text = "\n\n---\n\n".join(
+            [f"Content: {doc['content']}" for doc in documents]
+        )
         try:
             prompt = f"""
-            Based on the following question and answer, generate 3 relevant follow-up questions.
+            Based on the following question and answer, context and generate provided, generate 3 relevant follow-up questions and make it breif as well.
             Question: {query}
             Answer: {answer}
-            
+            Context: {context_text}
             Generate questions that:
             1. Seek clarification on specific points
             2. Explore related topics
             3. Request more detailed information
             
             Return only the questions, one per line.
+            
+            Do not return in numbered list.
+            
+            Do not return follow up questions that are already answered in the context.
+            
+            Do not return follow up questions that are not related to the context.
             """
             
             response = self.chat_model.predict(prompt)

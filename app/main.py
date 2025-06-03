@@ -30,7 +30,11 @@ class ChatRequest(BaseModel):
     query: str
     chat_history: Optional[List[Dict[str, str]]] = None
     search_type: str = "ai_search"  # ai_search, knowledge_graph, combined
-
+    
+class FollowUpRequest(BaseModel):
+    query: str
+    answer: str
+    
 @app.post("/api/search")
 async def search_documents(request: SearchRequest):
     """
@@ -59,7 +63,14 @@ async def chat(request: ChatRequest):
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+@app.post("/api/followups")
+async def generate_followups(request: FollowUpRequest):
+    try:
+        questions = await rag_service._generate_follow_up_questions(request.query, request.answer)
+        return {"follow_up_questions": questions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/health")
 async def health_check():
