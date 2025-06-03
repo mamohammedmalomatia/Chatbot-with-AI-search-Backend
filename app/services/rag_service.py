@@ -28,7 +28,7 @@ class RAGService:
         # Initialize Azure Search Client
         self.search_client = SearchClient(
             endpoint=os.getenv('AZURE_SEARCH_ENDPOINT'),
-            index_name=os.getenv('AZURE_SEARCH_INDEX_NAME'),
+            index_name="rag-1748934332165",#os.getenv('AZURE_SEARCH_INDEX_NAME'),
             credential=AzureKeyCredential(os.getenv('AZURE_SEARCH_API_KEY'))
         )
         
@@ -49,7 +49,40 @@ class RAGService:
             memory_key="chat_history",
             return_messages=True
         )
-        
+
+    async def get_suggestions(self, query: str) -> List[Dict[str, Any]]:
+        """Get keyword suggestions for a given query."""
+        try:
+            search_results = await self._azure_search(query)
+            seen = set()
+            suggestions = []
+
+            query_lower = query.lower()
+            logging.info(f"Search results: {search_results}")
+            for result in search_results:
+                keywords = result.get('key_words', [])
+                if not isinstance(keywords, list):
+                    continue
+
+                for keyword in keywords:
+                    keyword_lower = keyword.lower()
+                    if query_lower in keyword_lower and keyword_lower not in seen:
+                        seen.add(keyword_lower)
+                        suggestions.append({
+                            'text': keyword,
+                            'type': 'keyword',
+                            'score': result.get('@search.score', 0.0),
+                        })
+
+            # Sort by score descending
+            suggestions.sort(key=lambda x: x['score'], reverse=True)
+
+            return suggestions
+
+        except Exception as e:
+            logging.error(f"Failed to get suggestions: {e}")
+            return []
+
     async def _azure_search(
         self,
         query: str,
@@ -63,15 +96,19 @@ class RAGService:
         # Create a temporary client
         search_client = SearchClient(
             endpoint=os.getenv('AZURE_SEARCH_ENDPOINT'),
-            index_name=os.getenv('AZURE_SEARCH_INDEX_NAME'),
-            credential=AzureKeyCredential(os.getenv('AZURE_SEARCH_API_KEY'))
+            index_name="rag-1748934332165",#os.getenv('AZURE_SEARCH_INDEX_NAME'),
+            credential=AzureKeyCredential(os.getenv('AZURE_SEARCH_API_KEY')),
+            api_version="2025-05-01-preview"
         )
 
+        filter_string = self._build_filter_expression(filters) if filters else None
+        logging.info(f"Filter string: {filter_string}")
         async with search_client:
             search_results = await search_client.search(
                 search_text=query,
+                filter=filter_string if filter_string else "",
                 query_type="semantic",
-                top=3,
+                top=10,
             )
 
             async for result in search_results:
@@ -83,8 +120,9 @@ class RAGService:
                     "date": result.get('date', ''),
                     "content": result.get('chunk', ''),
                     "score": result.get('@search.score', 0.0),
-                    "page_number": result.get('page_number', 0),
                     "source": result.get('source', ''),
+                    "key_words": result.get('key_words', ''),
+                    "page_number": result.get('page_number', 0)
                 })
 
         # logging.info(f"Search results: {results}")
@@ -93,6 +131,21 @@ class RAGService:
         #     logging.error(f"Error during Azure Search: {str(e)}")
         #     return []
 
+    def _build_filter_expression(self, filters: Dict[str, Any]) -> str:
+        """Convert filters for 'department' and 'policy_type' into OData expression"""
+        expressions = []
+
+        for field in ['department', 'policy_type']:
+            values = filters.get(field)
+            if values:
+                if isinstance(values, list):
+                    if len(values) == 1:
+                        expressions.append(f"{field} eq '{values[0]}'")
+                    else:
+                        or_clause = " or ".join(f"{field} eq '{v}'" for v in values)
+                        expressions.append(f"({or_clause})")
+
+        return " and ".join(expressions)
         
     async def _neo4j_search(
         self,
@@ -259,7 +312,7 @@ class RAGService:
         )
         try:
             prompt = f"""
-            Based on the following question and answer, context and generate provided, generate 3 relevant follow-up questions and make it breif as well.
+            Based on the following question and answer, context and generate provided, generate 3 short relevant follow-up questions (not more than 10 words).
             Question: {query}
             Answer: {answer}
             Context: {context_text}
@@ -267,6 +320,8 @@ class RAGService:
             1. Seek clarification on specific points
             2. Explore related topics
             3. Request more detailed information
+            
+            Return short questions.
             
             Return only the questions, one per line.
             

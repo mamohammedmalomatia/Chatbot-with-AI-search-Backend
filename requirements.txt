@@ -13,3 +13,4 @@ python-multipart==0.0.9
 pydantic==2.6.1
 python-magic==0.4.27
 spacy==3.7.2
+python-dotenv
