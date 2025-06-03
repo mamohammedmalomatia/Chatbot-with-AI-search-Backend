@@ -267,6 +267,8 @@ class RAGService:
             template=(
                 "You are an assistant at Qatar Research Development and Innovation Council(QRDI). Use the following documents to answer the question.\n\n"
                 "Answer the question breifly and accurately based on the context provided.\n\n"
+                "Do not add numeric points or bullet points\n\n"
+                "Make it as breif \n\n"
                 "Context: {context}\n\nQuestion: {question}\nAnswer:.\n\n"
                 "Chat History: {chat_history}.\n\n"
             )
