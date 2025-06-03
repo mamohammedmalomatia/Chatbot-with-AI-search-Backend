@@ -1,0 +1,15 @@
+fastapi==0.109.2
+uvicorn==0.27.1
+python-dotenv==1.0.1
+azure-storage-blob==12.19.0
+azure-search-documents==11.4.0
+azure-identity==1.15.0
+langchain==0.1.9
+langchain-community==0.0.24
+langchain-openai==0.0.8
+neo4j==5.17.0
+PyPDF2==3.0.1
+python-multipart==0.0.9
+pydantic==2.6.1
+python-magic==0.4.27
+spacy==3.7.2
