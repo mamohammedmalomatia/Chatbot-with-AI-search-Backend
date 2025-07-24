@@ -28,7 +28,7 @@ class RAGService:
         # Initialize Azure Search Client
         self.search_client = SearchClient(
             endpoint=os.getenv('AZURE_SEARCH_ENDPOINT'),
-            index_name="rag-1748934332165",#os.getenv('AZURE_SEARCH_INDEX_NAME'),
+            index_name=os.getenv('AZURE_SEARCH_INDEX_NAME'),
             credential=AzureKeyCredential(os.getenv('AZURE_SEARCH_API_KEY'))
         )
         
@@ -96,7 +96,7 @@ class RAGService:
         # Create a temporary client
         search_client = SearchClient(
             endpoint=os.getenv('AZURE_SEARCH_ENDPOINT'),
-            index_name="rag-1748934332165",#os.getenv('AZURE_SEARCH_INDEX_NAME'),
+            index_name=os.getenv('AZURE_SEARCH_INDEX_NAME'),
             credential=AzureKeyCredential(os.getenv('AZURE_SEARCH_API_KEY')),
             api_version="2025-05-01-preview"
         )
